@@ -1,4 +1,4 @@
-# gui.py (v2.7 - Limpieza Automática y Threading)
+# gui.py (v2.8 - Con Memoria de Configuración)
 import os
 import sys
 import traceback
@@ -6,12 +6,44 @@ import tkinter.filedialog as fd
 import tkinter.messagebox as mb
 from typing import List
 import threading
+import json  # --- ¡NUEVO! ---
 
 import customtkinter as ctk
 import pandas as pd
 
 APP_NAME = "DataBridge"
-DEFAULT_OUT = "Reportes Fenur.xlsx"
+DEFAULT_OUT = "Tablas_Extraidas.xlsx"
+
+# --- ¡NUEVO! --- Lógica de Configuración
+# Define una ruta segura en la carpeta de datos del usuario (ej. %APPDATA%)
+try:
+    APP_DATA_DIR = os.path.join(os.getenv('APPDATA'), APP_NAME)
+except TypeError:
+    # Fallback por si os.getenv('APPDATA') es None (raro, pero posible)
+    APP_DATA_DIR = os.path.join(os.path.expanduser("~"), ".DataBridge")
+    
+CONFIG_FILE = os.path.join(APP_DATA_DIR, 'config.json')
+
+def _load_config() -> dict:
+    """Carga el config.json si existe."""
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            return {} # Archivo corrupto, empezar de cero
+    return {}
+
+def _save_config(config_data: dict):
+    """Guarda el diccionario de config en el config.json."""
+    try:
+        os.makedirs(APP_DATA_DIR, exist_ok=True)
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, indent=4)
+    except Exception as e:
+        print(f"Advertencia: No se pudo guardar la configuración: {e}")
+# --- FIN DE LA LÓGICA DE CONFIGURACIÓN ---
+
 
 # ===== Log de errores (Útil para producción) =====
 def _log_error(e, tb_text):
@@ -42,10 +74,6 @@ def _log_error(e, tb_text):
             f"Ocurrió un error:\n{e}\n\n"
             f"Además, no se pudo escribir el archivo de log por:\n{log_e}"
         )
-
-# ===== Apariencia inicial =====
-ctk.set_appearance_mode("light")
-ctk.set_default_color_theme("blue")
 
 # ===== Importar Extractor =====
 try:
@@ -151,16 +179,24 @@ def run_extraction(pdf_paths: list[str], out_path: str, progress_callback, is_ap
     df_final.to_excel(out_path, index=False, sheet_name="Datos")
     return filas_nuevas, filas_totales
 
-# ===== UI MODERNA v2.7 =====
+# ===== UI MODERNA v2.8 =====
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
+        
+        # --- ¡NUEVO! --- Cargar configuración ANTES de dibujar
+        self.config_data = _load_config()
+        self.theme_mode = self.config_data.get("theme_mode", "light")
+        ctk.set_appearance_mode(self.theme_mode)
+        # --- FIN NUEVO ---
+
         self.title(APP_NAME)
         self.geometry("800x600")
         self.minsize(720, 480)
 
         self.pdf_paths: List[str] = []
-        self.last_output_folder: str | None = None
+        # --- ¡MODIFICADO! --- Cargar la última carpeta usada
+        self.last_output_folder: str | None = self.config_data.get("last_output_folder")
 
         # Layout principal de 2 columnas
         self.grid_columnconfigure(0, weight=0) # Sidebar
@@ -212,6 +248,10 @@ class App(ctk.CTk):
             command=self.toggle_theme
         )
         self.theme_switch.grid(row=6, column=0, padx=20, pady=(0, 20), sticky="w")
+        # --- ¡NUEVO! --- Aplicar estado guardado al switch
+        if self.theme_mode == "dark":
+            self.theme_switch.select()
+        # --- FIN NUEVO ---
 
 
         # --- 2. Panel Principal (Derecha) ---
@@ -246,6 +286,12 @@ class App(ctk.CTk):
         )
         self.out_entry.grid(row=0, column=1, padx=5, pady=10, sticky="ew")
         
+        # --- ¡NUEVO! --- Aplicar última ruta guardada
+        if self.last_output_folder and os.path.exists(self.last_output_folder):
+            default_path = os.path.join(self.last_output_folder, DEFAULT_OUT)
+            self.out_entry.insert(0, default_path)
+        # --- FIN NUEVO ---
+
         self.out_btn = ctk.CTkButton(
             self.output_frame, text="Examinar…",
             width=120, command=self.pick_output
@@ -295,6 +341,13 @@ class App(ctk.CTk):
 
     # ===== Acciones =====
     
+    # --- ¡NUEVA FUNCIÓN! ---
+    def _save_config_data(self):
+        """Helper para guardar la config actual en el .json"""
+        self.config_data['theme_mode'] = self.theme_mode
+        self.config_data['last_output_folder'] = self.last_output_folder
+        _save_config(self.config_data)
+
     def open_output_folder(self):
         """Abre la carpeta de salida en el explorador de archivos"""
         if self.last_output_folder and os.path.exists(self.last_output_folder):
@@ -305,9 +358,11 @@ class App(ctk.CTk):
         else:
             mb.showwarning("Error", "La ruta de la carpeta no se encontró o ya no existe.")
 
+    # --- ¡MODIFICADO! ---
     def toggle_theme(self):
-        mode = "dark" if self.theme_switch.get() == 1 else "light"
-        ctk.set_appearance_mode(mode)
+        self.theme_mode = "dark" if self.theme_switch.get() == 1 else "light"
+        ctk.set_appearance_mode(self.theme_mode)
+        self._save_config_data() # Guardar el cambio
 
     def toggle_mode(self, mode: str):
         """Llamado por el botón segmentado"""
@@ -318,8 +373,13 @@ class App(ctk.CTk):
         else: # "Crear Nuevo"
             self.out_label.configure(text="Guardar Excel como:")
             self.out_btn.configure(text="Examinar…")
+            
+            # --- ¡NUEVO! --- Poner la última carpeta guardada si existe
+            if self.last_output_folder and os.path.exists(self.last_output_folder):
+                default_path = os.path.join(self.last_output_folder, DEFAULT_OUT)
+                self.out_entry.delete(0, "end")
+                self.out_entry.insert(0, default_path)
 
-    # --- ¡FUNCIÓN MODIFICADA! ---
     def update_file_list(self, reset_status: bool = True):
         """
         Limpia y redibuja la lista de archivos en el frame scrollable.
@@ -358,10 +418,9 @@ class App(ctk.CTk):
                 )
                 label.pack(side="left", fill="x", expand=True)
 
-        # Resetear estado SÓLO si se pide (ej. al limpiar o añadir, no al terminar)
         if reset_status:
             self.open_folder_btn.grid_remove()
-            self.status_label.grid() # Asegurarse de que el label normal sea visible
+            self.status_label.grid() 
             self.status_label.configure(text=f"Listo. {len(self.pdf_paths)} archivos en la lista.")
 
     def remove_file(self, path_to_remove: str):
@@ -371,7 +430,7 @@ class App(ctk.CTk):
         except ValueError:
             print(f"Error: no se pudo quitar {path_to_remove}")
         
-        self.update_file_list(reset_status=True) # Redibujar Y resetear estado
+        self.update_file_list(reset_status=True) 
 
     def pick_pdfs(self):
         paths = fd.askopenfilenames(
@@ -388,38 +447,51 @@ class App(ctk.CTk):
                 new_paths_added += 1
         
         if new_paths_added > 0:
-            self.update_file_list(reset_status=True) # Redibujar Y resetear estado
+            self.update_file_list(reset_status=True) 
             self.progress_bar.set(0)
         
+        # --- ¡MODIFICADO! ---
         if not self.out_entry.get() and self.mode_segmented_btn.get() == "Crear Nuevo":
-            first_dir = os.path.dirname(self.pdf_paths[0])
-            out_path = os.path.join(first_dir, DEFAULT_OUT)
+            # Usar la última carpeta guardada si existe, si no, la del primer PDF
+            base_dir = self.last_output_folder
+            if not base_dir or not os.path.exists(base_dir):
+                base_dir = os.path.dirname(self.pdf_paths[0])
+                
+            out_path = os.path.join(base_dir, DEFAULT_OUT)
             self.out_entry.delete(0, "end")
             self.out_entry.insert(0, out_path)
 
-    # --- ¡FUNCIÓN MODIFICADA! ---
     def clear_list(self):
         self.pdf_paths = []
-        self.update_file_list(reset_status=True) # Redibujar Y resetear estado
+        self.update_file_list(reset_status=True) 
         self.progress_bar.set(0)
 
+    # --- ¡MODIFICADO! ---
     def pick_output(self, is_open_dialog=False):
+        
+        initial_dir = self.last_output_folder or os.path.expanduser("~")
+
         if self.mode_segmented_btn.get() == "Añadir" or is_open_dialog:
             out = fd.askopenfilename(
                 title="Seleccionar Excel para añadir datos",
-                filetypes=[("Excel", "*.xlsx")]
+                filetypes=[("Excel", "*.xlsx")],
+                initialdir=initial_dir
             )
         else:
             out = fd.asksaveasfilename(
                 title="Guardar Excel como",
                 defaultextension=".xlsx",
                 filetypes=[("Excel", ".xlsx")],
-                initialfile=self.out_entry.get() or DEFAULT_OUT
+                initialfile=self.out_entry.get() or DEFAULT_OUT,
+                initialdir=initial_dir
             )
             
         if out:
             self.out_entry.delete(0, "end")
             self.out_entry.insert(0, out)
+            # --- ¡NUEVO! --- Guardar la carpeta seleccionada
+            self.last_output_folder = os.path.dirname(out)
+            self._save_config_data()
 
     # Callback de progreso seguro para hilos
     def update_progress_threadsafe(self, value, text):
@@ -454,21 +526,19 @@ class App(ctk.CTk):
         finally:
             self.after(0, self.reenable_buttons)
 
-    # --- ¡FUNCIÓN MODIFICADA! ---
+    # Funciones llamadas por `self.after` (hilo principal)
     def handle_success(self, msg, full_out_path, filas_totales):
         """Se ejecuta en el hilo principal al tener éxito."""
         self.progress_bar.set(1.0)
-        self.status_label.configure(text=f"¡Éxito! ({filas_totales}) filas añadidas")
+        self.status_label.configure(text=f"¡Éxito! ({filas_totales} filas)")
         
         self.last_output_folder = os.path.dirname(full_out_path)
         self.open_folder_btn.grid() # Mostrar el botón de abrir carpeta
 
         mb.showinfo("Listo", f"{msg}\nArchivo: {full_out_path}")
         
-        # --- ¡NUEVA LÓGICA! ---
-        # Limpiar la lista de DATOS y actualizar la UI SIN resetear el estado
         self.pdf_paths = []
-        self.update_file_list(reset_status=False) # ¡No resetear el estado!
+        self.update_file_list(reset_status=False) # No resetear el estado
 
     def handle_error(self):
         """Se ejecuta en el hilo principal al fallar."""
@@ -485,7 +555,7 @@ class App(ctk.CTk):
         self.clear_btn.configure(state="normal")
         self.mode_segmented_btn.configure(state="normal")
 
-    # on_convert_click ahora INICIA el hilo
+    # --- ¡MODIFICADO! ---
     def on_convert_click(self):
         if not self.pdf_paths:
             mb.showwarning("Faltan PDFs", "Primero selecciona uno o varios PDF.")
@@ -499,16 +569,22 @@ class App(ctk.CTk):
                 mb.showwarning("Falta Excel", "Selecciona un archivo Excel al cual añadir datos.")
                 return
             else:
-                out = os.path.join(os.path.dirname(self.pdf_paths[0]), DEFAULT_OUT)
+                # Usar la última carpeta guardada si existe
+                base_dir = self.last_output_folder or os.path.dirname(self.pdf_paths[0])
+                out = os.path.join(base_dir, DEFAULT_OUT)
         
         if not out.lower().endswith(".xlsx"):
             out += ".xlsx"
 
         self.out_entry.delete(0, "end")
         self.out_entry.insert(0, out)
+        
+        # --- ¡NUEVO! --- Guardar la carpeta de salida
+        self.last_output_folder = os.path.dirname(out)
+        self._save_config_data()
 
         self.open_folder_btn.grid_remove()
-        self.status_label.grid() # Asegurarse de que el label de estado esté visible
+        self.status_label.grid() 
         self.status_label.configure(text="Iniciando...")
 
         # Desactivar botones
@@ -537,4 +613,22 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         tb_text = traceback.format_exc()
-        _log_error(e, tb_text)
+        # Log de error si la app ni siquiera puede iniciar
+        log_filename = "STARTUP_ERROR.log"
+        try:
+            # Intentar escribir en la carpeta del script (para desarrollo)
+            base_path = os.path.dirname(__file__)
+            log_path = os.path.join(base_path, log_filename)
+            with open(log_path, "w", encoding="utf-8") as f:
+                f.write(tb_text)
+        except Exception:
+            try:
+                # Fallback a la carpeta home del usuario
+                base_path = os.path.expanduser("~")
+                log_path = os.path.join(base_path, log_filename)
+                with open(log_path, "w", encoding="utf-8") as f:
+                    f.write(tb_text)
+            except Exception:
+                pass # No se pudo escribir el log
+        
+        # (El _log_error fallaría aquí, así que no lo llamamos)
