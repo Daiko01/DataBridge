@@ -1,8 +1,8 @@
-; Setup-DataBridge-v2.1.iss
+; Setup-DataBridge-v3.0.iss
 ; Instalador oficial de DataBridge - creado por Leonardo Riveros
 
 #define MyAppName "DataBridge"
-#define MyAppVersion "2.1"
+#define MyAppVersion "3.0"
 #define MyAppPublisher "Leonardo Riveros"
 #define MyAppExeName "DataBridge.exe"
 #define MyAppIcon "C:\Proyectos\DataBridge\assets\app.ico"
@@ -16,7 +16,7 @@ DefaultDirName={pf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=.
-OutputBaseFilename=Setup-DataBridge-v2.1
+OutputBaseFilename=Setup-DataBridge-v3.0
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -32,7 +32,7 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 
 [Files]
 ; Copia el ejecutable y todas las dependencias necesarias
-Source: "C:\Proyectos\DataBridge\dist\PDF2ExcelExtractor\*"; \
+Source: "C:\Proyectos\DataBridge\dist\DataBridge\*"; \
     DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]

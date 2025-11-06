@@ -13,7 +13,6 @@ except ImportError:
 
 pdfminer_path = os.path.dirname(pdfminer.__file__)
 pdfminer_cmap_path = os.path.join(pdfminer_path, 'cmap')
-# (source, destination_relative_to_exe_root)
 pdfminer_datas = (pdfminer_cmap_path, 'pdfminer/cmap')
 # --- FIN DE LA CORRECCIÓN DE PDFMINER ---
 
@@ -29,11 +28,11 @@ block_cipher = None
 
 a = Analysis(
     ['gui.py'],  # Tu script principal
-    pathex=['C:\\Proyectos\\PDF2Excel'], # Ruta a tu proyecto
+    pathex=['C:\\Proyectos\\DataBridge'], # Ruta a tu proyecto
     binaries=[],
     
     datas=[
-        pdfminer_datas,  # <--- CORRECCIÓN 1 (Incluye los archivos)
+        pdfminer_datas, 
         app_icon_datas
     ],
     
@@ -41,9 +40,10 @@ a = Analysis(
         'pdfminer.six', 'pdfminer.pdfparser', 'pdfminer.pdfinterp',
         'pdfminer.pdfdevice', 'pdfminer.pdfpage', 'pdfminer.converter',
         'pdfminer.layout', 'pdfminer.cmapdb',
+        'requests'  # --- ¡¡AQUÍ ESTÁ EL CAMBIO!! ---
     ],
     
-    # --- CORRECCIÓN 2: EXCLUIR IMPORTACIONES PROBLEMÁTICAS ---
+    # --- EXCLUIR IMPORTACIONES PROBLEMÁTICAS ---
     excludes=[
         'tabula', 'tabula-py', 'pytesseract', 'pdf2image'
     ],
@@ -51,10 +51,8 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     
-    # --- ¡¡AQUÍ ESTÁ LA LÍNEA MÁGICA!! ---
     # Esto ejecuta runtime_hook.py ANTES que gui.py
     runtime_hooks=['runtime_hook.py'],
-    # --- FIN DE LA LÍNEA MÁGICA ---
     
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -89,5 +87,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='PDF2ExcelExtractor',
+    name='DataBridge',
 )
