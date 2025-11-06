@@ -1,30 +1,44 @@
-PDF → Excel (GUI)
-=====================
+# 🧩 DataBridge
 
-Requisitos:
-- Windows 10/11
-- Python 3.10+ instalado con "Add to PATH"
-- Conexión para instalar dependencias la primera vez
+**DataBridge** es una aplicación de escritorio para Windows que convierte fácilmente datos contenidos en archivos **PDF** a hojas de cálculo **Excel (.xlsx)**.  
+Cuenta con una interfaz moderna, soporte para modo claro/oscuro y un instalador completo para usuarios finales.
 
-Instrucciones rápidas (crear EXE en dist\):
-1) Doble clic en build_exe.bat
-   - Crea .venv, instala requirements, ejecuta PyInstaller
-2) Al finalizar, encontrarás el ejecutable en:
-   dist\PDF2Excel.exe
+---
 
-Comando PyInstaller equivalente (por si prefieres manual):
-  py -m PyInstaller --noconfirm --onefile --windowed --name "PDF2Excel" --icon "app.ico" --distpath "dist" gui.py
+## 🚀 Características principales
+- Extrae tablas de uno o varios PDF automáticamente.  
+- Genera archivos Excel limpios y organizados.  
+- Interfaz amigable creada con **CustomTkinter**.  
+- Modo claro 🌞 / oscuro 🌙.  
+- Incluye instalador profesional (Inno Setup).  
 
-Uso de la app (GUI):
-1) Presiona "Elegir PDF(s)" y selecciona uno o varios PDF
-2) Elige la salida .xlsx (o deja el valor sugerido)
-3) Clic en "Convertir a Excel"
-4) Se generará un archivo Excel con hoja 'Datos' y columnas:
-   Fecha, Maquina, Patente, Folio, Variante, Frec, Conductores, Ab, SD, CI, %, EV, TE
+---
 
-Toggle de tema:
-- Botón ☀️/🌙 (arriba a la derecha) para alternar claro/oscuro
+## 💻 Requisitos del sistema
+- Windows 10 u 11 x64
+---
 
-Notas:
-- La app usa tu archivo extractors.py (función parse_pdf_any)
-- El Excel se guarda SIN columna de índice (#)
+## ⚙️ Instalación (versión compilada)
+1. Descarga el instalador **`Setup-DataBridge-v1.0.exe`** desde la sección [Releases](../../releases).  
+2. Ejecútalo y sigue los pasos del asistente.  
+3. Una vez instalado, encontrarás **DataBridge** en tu escritorio o menú inicio.
+
+---
+
+## 🧠 Uso básico
+1. Abre **DataBridge**.  
+2. Haz clic en **“Elegir PDF(s)”** y selecciona uno o más archivos.  
+3. Elige la ubicación donde se guardará el Excel.  
+4. Pulsa **“Convertir a Excel”**.  
+5. ¡Listo! Se generará un archivo `.xlsx` con tus datos convertidos.
+
+---
+
+## 🧑‍💻 Autor
+**Leonardo Riveros**    
+
+---
+
+## 🏷️ Versión
+**DataBridge v1.0**  
+© 2025 Leonardo Riveros – Todos los derechos reservados.
