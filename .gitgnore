@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.spec
+
+# Entorno virtual
+.venv/
+env/
+venv/
+
+# Compilaciones / builds
+build/
+dist/
+*_internal/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Inno Setup y ejecutables
+installer/*.exe
+
+# Logs
+*.log
+*.tmp
