@@ -1,4 +1,4 @@
-# gui.py (v3.1 - Pestaña de Cálculos, Auto-Updater, Memoria y Threading)
+# gui.py (v3.1.2 - Resumen por Maquina, Auto-Updater, Memoria y Threading)
 import os
 import sys
 import traceback
@@ -18,8 +18,7 @@ APP_NAME = "DataBridge"
 DEFAULT_OUT = "Tablas_Extraidas.xlsx"
 
 # --- Lógica de Versión y Actualización ---
-APP_CURRENT_VERSION = "v3.0.2" # ¡Importante! Esta es la versión de este build.
-# (Asegúrate de cambiar esto a "v3.1" si vas a lanzar un nuevo release)
+APP_CURRENT_VERSION = "v3.1.2" # ¡Importante! Esta es la versión de este build.
 GITHUB_REPO_API = "https://api.github.com/repos/daiko01/DataBridge/releases/latest"
 # --- FIN ---
 
@@ -128,22 +127,24 @@ def _rows_to_df(rows: list[dict]) -> pd.DataFrame:
             "TE": r.get("TE"),
         })
     df = pd.DataFrame(mapped, columns=TARGET_COLS)
-    for c in ["Fecha", "Patente", "Conductores"]:
+    for c in ["Fecha", "Patente", "Conductores", "Folio"]:
         df[c] = df[c].astype(str).str.replace(r"\s+", " ", regex=True).str.strip()
         df[c] = df[c].replace({"None": ""})
     return df
 
-# --- ¡¡NUEVA FUNCIÓN DE CÁLCULO!! ---
+# --- ¡¡FUNCIÓN DE CÁLCULO MODIFICADA!! ---
 def _calculate_vueltas(df: pd.DataFrame) -> pd.DataFrame:
     """
     Toma el DataFrame de datos brutos y calcula el resumen de vueltas.
     Asume que 1 fila = 1 vuelta.
     """
     if df.empty:
+        # --- ¡CAMBIADO! ---
         return pd.DataFrame(columns=["Patente", "Maquina", "Total Vueltas"])
 
     try:
-        # Agrupar por Patente y Conductor, contar cuántas filas (Folio) tiene cada uno
+        # --- ¡CAMBIADO! ---
+        # Agrupar por Patente y Maquina, contar cuántas filas (Folio) tiene cada uno
         resumen = df.groupby(['Patente', 'Maquina'])['Folio'].count()
         
         # Convertir de un objeto "Series" a un "DataFrame" y renombrar la columna
@@ -156,10 +157,9 @@ def _calculate_vueltas(df: pd.DataFrame) -> pd.DataFrame:
         
     except Exception as e:
         print(f"Error al calcular resumen: {e}")
-        # Devolver un dataframe vacío en caso de error
+        # --- ¡CAMBIADO! ---
         return pd.DataFrame(columns=["Patente", "Maquina", "Total Vueltas"])
 
-# --- ¡FUNCIÓN MODIFICADA! ---
 def run_extraction(pdf_paths: list[str], out_path: str, progress_callback, is_append_mode: bool) -> tuple[int, int]:
     """
     Ejecuta la extracción y ahora también los cálculos.
@@ -168,7 +168,6 @@ def run_extraction(pdf_paths: list[str], out_path: str, progress_callback, is_ap
     if not extractors:
         raise RuntimeError(f"No se pudo importar 'extractors.py': {_import_err}")
     
-    # --- Parte 1: Leer datos antiguos (si está en modo "Añadir") ---
     df_old = pd.DataFrame()
     if is_append_mode:
         if not os.path.exists(out_path):
@@ -181,7 +180,6 @@ def run_extraction(pdf_paths: list[str], out_path: str, progress_callback, is_ap
         
         df_old = df_old.reindex(columns=TARGET_COLS)
         
-    # --- Parte 2: Extraer nuevos datos de los PDFs ---
     all_rows = []
     total_files = len(pdf_paths)
     for i, p in enumerate(pdf_paths):
@@ -207,12 +205,9 @@ def run_extraction(pdf_paths: list[str], out_path: str, progress_callback, is_ap
     df_final.drop_duplicates(inplace=True)
     filas_totales = len(df_final)
     
-    # --- ¡NUEVO! ---
-    # --- Parte 3: Calcular Resumen ---
     progress_callback(0.95, "Calculando resumen de vueltas...")
-    df_resumen = _calculate_vueltas(df_final)
+    df_resumen = _calculate_vueltas(df_final) # ¡Llama a la nueva función!
 
-    # --- Parte 4: Guardar AMBAS pestañas en el Excel ---
     progress_callback(0.98, "Guardando archivo Excel...")
     try:
         with pd.ExcelWriter(out_path, engine='openpyxl') as writer:
@@ -224,19 +219,16 @@ def run_extraction(pdf_paths: list[str], out_path: str, progress_callback, is_ap
         raise e
 
     return filas_nuevas, filas_totales
-# --- FIN DE LAS MODIFICACIONES DE LÓGICA ---
 
 
-# ===== UI MODERNA v3.1 =====
+# ===== UI MODERNA v3.1.2 =====
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         
-        # --- Cargar configuración ANTES de dibujar ---
         self.config_data = _load_config()
         self.theme_mode = self.config_data.get("theme_mode", "light")
         ctk.set_appearance_mode(self.theme_mode)
-        # --- FIN ---
 
         self.title(APP_NAME)
         self.geometry("800x600")
@@ -245,7 +237,6 @@ class App(ctk.CTk):
         self.pdf_paths: List[str] = []
         self.last_output_folder: str | None = self.config_data.get("last_output_folder")
 
-        # Layout principal de 2 columnas
         self.grid_columnconfigure(0, weight=0) # Sidebar
         self.grid_columnconfigure(1, weight=1) # Panel principal
         self.grid_rowconfigure(0, weight=1)
@@ -548,10 +539,11 @@ class App(ctk.CTk):
         except Exception as e:
             tb_text = traceback.format_exc()
             _log_error(e, tb_text) 
-            self.after(0, self.handle_error, str(e)) # Pasar el mensaje de error
+            self.after(0, self.handle_error, str(e))
 
     # Funciones llamadas por `self.after` (hilo principal)
     def handle_success(self, msg, full_out_path, filas_totales):
+        """Se ejecuta en el hilo principal al tener éxito."""
         self.progress_bar.set(1.0)
         self.status_label.configure(text=f"¡Éxito! ({filas_totales} filas)")
         
@@ -562,24 +554,29 @@ class App(ctk.CTk):
         
         self.pdf_paths = []
         self.update_file_list(reset_status=False) 
+        
+        self.reenable_buttons() 
 
     def handle_error(self, error_msg: str):
         """Se ejecuta en el hilo principal al fallar."""
         self.progress_bar.set(0)
-        # Mostrar un error más amigable si el Excel está abierto
         if "PermissionError" in error_msg:
              self.status_label.configure(text="Error: El archivo Excel está abierto. Ciérralo y reintenta.")
         else:
              self.status_label.configure(text="Error. Revisa CONVERSION_ERROR.log")
         self.open_folder_btn.grid_remove()
+        
+        self.reenable_buttons() 
 
     def reenable_buttons(self):
+        """Se ejecuta en el hilo principal SIEMPRE al finalizar."""
         self.progress_bar.stop()
         self.progress_bar.configure(mode="determinate")
         self.convert_btn.configure(state="normal", text="Convertir a Excel")
         self.pick_btn.configure(state="normal")
         self.clear_btn.configure(state="normal")
         self.mode_segmented_btn.configure(state="normal")
+        self.out_btn.configure(state="normal") 
 
     # on_convert_click ahora INICIA el hilo
     def on_convert_click(self):
@@ -616,6 +613,7 @@ class App(ctk.CTk):
         self.pick_btn.configure(state="disabled")
         self.clear_btn.configure(state="disabled")
         self.mode_segmented_btn.configure(state="disabled")
+        self.out_btn.configure(state="disabled") 
 
         # Iniciar animación y el hilo de trabajo
         self.progress_bar.set(0)
@@ -677,6 +675,7 @@ class App(ctk.CTk):
             self.pick_btn.configure(state="disabled")
             self.clear_btn.configure(state="disabled")
             self.mode_segmented_btn.configure(state="disabled")
+            self.out_btn.configure(state="disabled") 
 
             threading.Thread(target=self._download_and_install_thread, 
                              args=(download_url, new_version), 
@@ -703,7 +702,7 @@ class App(ctk.CTk):
             self.after(0, self.progress_bar.stop)
             self.after(0, self.progress_bar.configure, {"mode": "determinate"})
             self.after(0, mb.showerror, ("Error de Actualización", f"No se pudo descargar el instalador:\n{e}"))
-            self.after(0, self.reenable_buttons) 
+            self.after(0, self.reenable_buttons) # Reactivar botones si la descarga falla 
 
 
 def main():

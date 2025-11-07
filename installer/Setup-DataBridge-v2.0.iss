@@ -1,8 +1,8 @@
-; Setup-DataBridge-v3.0.iss
+; Setup-DataBridge-v3.1.2.iss
 ; Instalador oficial de DataBridge - creado por Leonardo Riveros
 
 #define MyAppName "DataBridge"
-#define MyAppVersion "3.0"
+#define MyAppVersion "3.1.2"
 #define MyAppPublisher "Leonardo Riveros"
 #define MyAppExeName "DataBridge.exe"
 #define MyAppIcon "C:\Proyectos\DataBridge\assets\app.ico"
@@ -16,7 +16,7 @@ DefaultDirName={pf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=.
-OutputBaseFilename=Setup-DataBridge-v3.0
+OutputBaseFilename=Setup-DataBridge-v3.1.2
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
