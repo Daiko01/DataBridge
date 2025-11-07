@@ -1,0 +1,25 @@
+Ha ocurrido un error durante la conversión:
+
+Error: No se pudo guardar el archivo. ¿Está 'prat.xlsx' abierto?
+
+==================================================
+Traceback:
+Traceback (most recent call last):
+  File "C:\Proyectos\DataBridge\gui.py", line 217, in run_extraction
+    with pd.ExcelWriter(out_path, engine='openpyxl') as writer:
+  File "C:\Users\LeoRi\AppData\Local\Programs\Python\Python310\lib\site-packages\pandas\io\excel\_openpyxl.py", line 61, in __init__
+    super().__init__(
+  File "C:\Users\LeoRi\AppData\Local\Programs\Python\Python310\lib\site-packages\pandas\io\excel\_base.py", line 1246, in __init__
+    self._handles = get_handle(
+  File "C:\Users\LeoRi\AppData\Local\Programs\Python\Python310\lib\site-packages\pandas\io\common.py", line 882, in get_handle
+    handle = open(handle, ioargs.mode)
+PermissionError: [Errno 13] Permission denied: 'C:/Users/LeoRi/OneDrive/Escritorio/excel salida/prat.xlsx'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Proyectos\DataBridge\gui.py", line 529, in run_extraction_task
+    (filas_nuevas, filas_totales) = run_extraction(
+  File "C:\Proyectos\DataBridge\gui.py", line 221, in run_extraction
+    raise PermissionError(f"No se pudo guardar el archivo. ¿Está '{os.path.basename(out_path)}' abierto?")
+PermissionError: No se pudo guardar el archivo. ¿Está 'prat.xlsx' abierto?

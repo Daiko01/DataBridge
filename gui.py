@@ -1,4 +1,4 @@
-# gui.py (v3.1.2 - Resumen por Maquina, Auto-Updater, Memoria y Threading)
+# gui.py (v3.1.8 - Corrección Duplicados, Resumen Maquina, Folio Texto)
 import os
 import sys
 import traceback
@@ -18,7 +18,7 @@ APP_NAME = "DataBridge"
 DEFAULT_OUT = "Tablas_Extraidas.xlsx"
 
 # --- Lógica de Versión y Actualización ---
-APP_CURRENT_VERSION = "v3.1.2" # ¡Importante! Esta es la versión de este build.
+APP_CURRENT_VERSION = "v3.1.8" # ¡Importante! Esta es la versión de este build.
 GITHUB_REPO_API = "https://api.github.com/repos/daiko01/DataBridge/releases/latest"
 # --- FIN ---
 
@@ -69,11 +69,13 @@ def _log_error(e, tb_text):
             f.write("Traceback:\n")
             f.write(tb_text)
         
-        mb.showerror(
-            "Error", 
-            f"Ocurrió un problema:\n{e}\n\n"
-            f"Se guardó un log detallado en:\n{log_path}"
-        )
+        # No mostrar el popup si es un error de permiso, ya lo manejamos
+        if "No se pudo guardar el archivo" not in tb_text and "No se pudo leer el archivo" not in tb_text:
+            mb.showerror(
+                "Error", 
+                f"Ocurrió un problema:\n{e}\n\n"
+                f"Se guardó un log detallado en:\n{log_path}"
+            )
     except Exception as log_e:
         mb.showerror(
             "Error Crítico", 
@@ -108,7 +110,9 @@ def _normalize_percent(v):
     except:
         return s
 
+# --- ¡MODIFICADO! ---
 def _rows_to_df(rows: list[dict]) -> pd.DataFrame:
+    """Crea el DataFrame y se asegura de que sea 100% TEXTO."""
     mapped = []
     for r in rows:
         mapped.append({
@@ -127,23 +131,26 @@ def _rows_to_df(rows: list[dict]) -> pd.DataFrame:
             "TE": r.get("TE"),
         })
     df = pd.DataFrame(mapped, columns=TARGET_COLS)
-    for c in ["Fecha", "Patente", "Conductores", "Folio"]:
-        df[c] = df[c].astype(str).str.replace(r"\s+", " ", regex=True).str.strip()
-        df[c] = df[c].replace({"None": ""})
+    
+    # --- ¡CORRECCIÓN CLAVE! ---
+    # Forzar TODAS las columnas a ser texto (str) ANTES de limpiar.
+    # Esto asegura que "170" (str) se compare con "170" (str).
+    for col in df.columns:
+        df[col] = df[col].astype(str).str.replace(r"\.0$", "", regex=True) # Limpia ".0" si pandas añade decimales
+        df[col] = df[col].str.replace(r"\s+", " ", regex=True).str.strip()
+        df[col] = df[col].replace({"None": "", "nan": ""})
+            
     return df
 
-# --- ¡¡FUNCIÓN DE CÁLCULO MODIFICADA!! ---
 def _calculate_vueltas(df: pd.DataFrame) -> pd.DataFrame:
     """
     Toma el DataFrame de datos brutos y calcula el resumen de vueltas.
     Asume que 1 fila = 1 vuelta.
     """
     if df.empty:
-        # --- ¡CAMBIADO! ---
         return pd.DataFrame(columns=["Patente", "Maquina", "Total Vueltas"])
 
     try:
-        # --- ¡CAMBIADO! ---
         # Agrupar por Patente y Maquina, contar cuántas filas (Folio) tiene cada uno
         resumen = df.groupby(['Patente', 'Maquina'])['Folio'].count()
         
@@ -157,9 +164,9 @@ def _calculate_vueltas(df: pd.DataFrame) -> pd.DataFrame:
         
     except Exception as e:
         print(f"Error al calcular resumen: {e}")
-        # --- ¡CAMBIADO! ---
         return pd.DataFrame(columns=["Patente", "Maquina", "Total Vueltas"])
 
+# --- ¡MODIFICADO! ---
 def run_extraction(pdf_paths: list[str], out_path: str, progress_callback, is_append_mode: bool) -> tuple[int, int]:
     """
     Ejecuta la extracción y ahora también los cálculos.
@@ -174,8 +181,19 @@ def run_extraction(pdf_paths: list[str], out_path: str, progress_callback, is_ap
             raise FileNotFoundError(f"No se encontró el archivo '{os.path.basename(out_path)}' para añadir datos.")
         progress_callback(0.0, f"Leyendo {os.path.basename(out_path)}...")
         try:
-            df_old = pd.read_excel(out_path, sheet_name="Datos")
+            # --- ¡CORRECCIÓN CLAVE! ---
+            # Leer TODAS las columnas como TEXTO (str)
+            df_old = pd.read_excel(out_path, sheet_name="Datos", dtype=str)
+            
+            # Limpiar los datos leídos para que coincidan con el formato de _rows_to_df
+            for col in df_old.columns:
+                df_old[col] = df_old[col].astype(str).str.replace(r"\.0$", "", regex=True)
+                df_old[col] = df_old[col].str.replace(r"\s+", " ", regex=True).str.strip()
+                df_old[col] = df_old[col].replace({"None": "", "nan": ""})
+            
         except Exception as e:
+            if "Permission denied" in str(e):
+                raise PermissionError(f"No se pudo leer el archivo. ¿Está '{os.path.basename(out_path)}' abierto?")
             raise ValueError(f"No se pudo leer la hoja 'Datos' del Excel. ¿Es el archivo correcto?\nError: {e}")
         
         df_old = df_old.reindex(columns=TARGET_COLS)
@@ -187,7 +205,7 @@ def run_extraction(pdf_paths: list[str], out_path: str, progress_callback, is_ap
         rows, by_page, method = extractors.parse_pdf_any(p, use_ocr=False)
         all_rows.extend(rows)
         
-    df_new = _rows_to_df(all_rows)
+    df_new = _rows_to_df(all_rows) # df_new ya es 100% texto
     filas_nuevas = len(df_new)
     
     if filas_nuevas == 0 and len(df_old) == 0:
@@ -202,11 +220,12 @@ def run_extraction(pdf_paths: list[str], out_path: str, progress_callback, is_ap
     else:
         df_final = df_new
     
+    # ¡Ahora sí! drop_duplicates comparará TEXTO vs TEXTO
     df_final.drop_duplicates(inplace=True)
     filas_totales = len(df_final)
     
     progress_callback(0.95, "Calculando resumen de vueltas...")
-    df_resumen = _calculate_vueltas(df_final) # ¡Llama a la nueva función!
+    df_resumen = _calculate_vueltas(df_final)
 
     progress_callback(0.98, "Guardando archivo Excel...")
     try:
@@ -221,7 +240,7 @@ def run_extraction(pdf_paths: list[str], out_path: str, progress_callback, is_ap
     return filas_nuevas, filas_totales
 
 
-# ===== UI MODERNA v3.1.2 =====
+# ===== UI MODERNA v3.1.8 =====
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -560,10 +579,17 @@ class App(ctk.CTk):
     def handle_error(self, error_msg: str):
         """Se ejecuta en el hilo principal al fallar."""
         self.progress_bar.set(0)
-        if "PermissionError" in error_msg:
-             self.status_label.configure(text="Error: El archivo Excel está abierto. Ciérralo y reintenta.")
+        
+        # --- ¡CORREGIDO! ---
+        # Detectar el error de "Archivo Abierto"
+        if "No se pudo guardar el archivo" in error_msg or "No se pudo leer el archivo" in error_msg:
+             friendly_msg = "Error: El archivo Excel está abierto. Ciérralo y reintenta."
+             self.status_label.configure(text=friendly_msg)
+             mb.showerror("Archivo Bloqueado", friendly_msg.replace("Error: ", ""))
         else:
+             # Cualquier otro error
              self.status_label.configure(text="Error. Revisa CONVERSION_ERROR.log")
+        
         self.open_folder_btn.grid_remove()
         
         self.reenable_buttons() 
