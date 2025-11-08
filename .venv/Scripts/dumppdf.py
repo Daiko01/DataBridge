@@ -1,4 +1,4 @@
-#!C:\Proyectos\PDF2Excel\.venv\Scripts\python.exe
+#!C:\Proyectos\DataBridge\.venv\Scripts\python.exe
 """Extract pdf structure in XML format"""
 
 import logging

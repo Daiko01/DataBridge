@@ -1,7 +1,38 @@
-# gui.py (v3.1.8 - Con Optimización de Memoria + Packaging + TypedDict)
+# gui.py (v3.2.1 - Release Pública Estable)
 import os
 import sys
 import traceback
+import importlib.util  # Para la carga forzada
+
+# --- INICIO: ARREGLO DE SYS.PATH (HOTFIX v3.4.4) ---
+# Mantenemos esto, ya que tu entorno sys.path está roto.
+def get_base_path():
+    """ Obtiene la ruta base (para .exe o script) """
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    else:
+        return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+APP_ROOT = get_base_path()
+
+def _candidate_site_packages(root: str):
+    cands = []
+    if sys.platform == "win32":
+        cands.append(os.path.join(root, ".venv", "Lib", "site-packages"))
+        cands.append(os.path.join(root, ".venv", "lib", "site-packages"))
+    else:
+        pyver = f"python{sys.version_info.major}.{sys.version_info.minor}"
+        cands.append(os.path.join(root, ".venv", "lib", pyver, "site-packages"))
+        cands.append(os.path.join(root, ".venv", "lib", "site-packages"))
+
+    return cands
+
+for _p in _candidate_site_packages(APP_ROOT):
+    if os.path.isdir(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
+# --- FIN: ARREGLO DE SYS.PATH ---
+
+
 import tkinter.filedialog as fd
 import tkinter.messagebox as mb
 from typing import List
@@ -10,18 +41,33 @@ import queue
 import json
 import requests     # Para el auto-updater
 import subprocess   # Para el auto-updater
-from packaging.version import Version # <-- MODIFICADO: Reemplazo moderno de distutils
+from packaging.version import Version # Reemplazo moderno de distutils
 
-import customtkinter as ctk
+try:
+    import customtkinter as ctk
+    _ = ctk.CTkToplevel 
+except (ImportError, AttributeError) as e:
+    mb.showerror("Error Crítico de ImportACIÓN", 
+                 f"No se pudo cargar 'customtkinter' correctamente.\n\n"
+                 f"Error: {e}\n\n"
+                 f"Por favor, asegÚrate de que esté instalado (pip install customtkinter>=5.2.0)")
+    sys.exit(1)
+    
 import pandas as pd
 
 APP_NAME = "DataBridge"
 DEFAULT_OUT = "Tablas_Extraidas.xlsx"
 
 # --- Lógica de Versión y Actualización ---
-APP_CURRENT_VERSION = "v3.2.0" # ¡Importante! Esta es la versión de este build.
+# CORREGIDO: Alineado con la release pública de GitHub
+APP_CURRENT_VERSION = "v3.2.1" 
 GITHUB_REPO_API = "https://api.github.com/repos/daiko01/DataBridge/releases/latest"
 # --- FIN ---
+
+# --- LÓGICA DE RUTAS ROBUSTA (Usada por el icono y logs) ---
+ICON_PATH = os.path.join(APP_ROOT, "assets", "app.ico")
+# --- FIN: LÓGICA DE RUTAS ---
+
 
 # --- Lógica de Configuración ---
 try:
@@ -57,11 +103,7 @@ def _log_error(e, tb_text):
     """Guarda el traceback en un archivo para depurar el .exe"""
     log_filename = "CONVERSION_ERROR.log"
     try:
-        if getattr(sys, 'frozen', False):
-            base_path = os.path.dirname(sys.executable)
-        else:
-            base_path = os.path.dirname(__file__)
-        log_path = os.path.join(base_path, log_filename)
+        log_path = os.path.join(APP_ROOT, log_filename)
         
         with open(log_path, "w", encoding="utf-8") as f:
             f.write(f"Ha ocurrido un error durante la conversión:\n\n")
@@ -70,7 +112,6 @@ def _log_error(e, tb_text):
             f.write("Traceback:\n")
             f.write(tb_text)
         
-        # No mostrar el popup si es un error de permiso, ya lo manejamos
         if "No se pudo guardar el archivo" not in tb_text and "No se pudo leer el archivo" not in tb_text:
             mb.showerror(
                 "Error", 
@@ -86,12 +127,12 @@ def _log_error(e, tb_text):
 
 # ===== Importar Extractor =====
 try:
-    import extractors  # tu archivo existente
-    from extractors import ExtractedRow # <-- MODIFICADO: Importar tipo
+    import extractors
+    from extractors import ExtractedRow
     _import_err = None
 except Exception as e:
     extractors = None
-    ExtractedRow = None # <-- MODIFICADO: Fallback
+    ExtractedRow = None
     _import_err = e
 
 # Columnas objetivo (mantener)
@@ -113,14 +154,13 @@ def _normalize_percent(v):
     except:
         return s
 
-# --- ¡MODIFICADO! ---
-def _rows_to_df(rows: list[ExtractedRow]) -> pd.DataFrame: # <-- MODIFICADO
+def _rows_to_df(rows: list[ExtractedRow]) -> pd.DataFrame:
     """Crea el DataFrame y se asegura de que sea 100% TEXTO."""
     mapped = []
     for r in rows:
         mapped.append({
             "Fecha": r.get("Fecha"),
-            "Maquina": r.get("Máquina"), # <-- Tu editor ahora te avisará si escribes "Maquina"
+            "Maquina": r.get("Máquina"),
             "Patente": r.get("Patente"),
             "Folio": r.get("Folio"),
             "Variante": r.get("Variante"),
@@ -135,52 +175,33 @@ def _rows_to_df(rows: list[ExtractedRow]) -> pd.DataFrame: # <-- MODIFICADO
         })
     df = pd.DataFrame(mapped, columns=TARGET_COLS)
     
-    # --- ¡CORRECCIÓN CLAVE! ---
-    # Forzar TODAS las columnas a ser texto (str) ANTES de limpiar.
-    # Esto asegura que "170" (str) se compare con "170" (str).
     for col in df.columns:
-        df[col] = df[col].astype(str).str.replace(r"\.0$", "", regex=True) # Limpia ".0" si pandas añade decimales
+        df[col] = df[col].astype(str).str.replace(r"\.0$", "", regex=True)
         df[col] = df[col].str.replace(r"\s+", " ", regex=True).str.strip()
         df[col] = df[col].replace({"None": "", "nan": ""})
             
     return df
 
 def _calculate_vueltas(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Toma el DataFrame de datos brutos y calcula el resumen de vueltas.
-    Asume que 1 fila = 1 vuelta.
-    """
+    """Calcula el resumen de vueltas."""
     if df.empty:
         return pd.DataFrame(columns=["Patente", "Maquina", "Total Vueltas"])
 
     try:
-        # Agrupar por Patente y Maquina, contar cuántas filas (Folio) tiene cada uno
         resumen = df.groupby(['Patente', 'Maquina'])['Folio'].count()
-        
-        # Convertir de un objeto "Series" a un "DataFrame" y renombrar la columna
         resumen_df = resumen.reset_index(name='Total Vueltas')
-        
-        # Ordenar de mayor a menor para ver los más frecuentes primero
         resumen_df = resumen_df.sort_values(by='Total Vueltas', ascending=False)
-        
         return resumen_df
         
     except Exception as e:
         print(f"Error al calcular resumen: {e}")
         return pd.DataFrame(columns=["Patente", "Maquina", "Total Vueltas"])
 
-# --- ¡MODIFICADO! (Fusiona v3.1.8 + Optimización de RAM) ---
 def run_extraction(pdf_paths: list[str], out_path: str, progress_callback, is_append_mode: bool) -> tuple[int, int]:
-    """
-    Ejecuta la extracción y cálculos (Versión Optimizada en Memoria v3.1.8).
-    Procesa un PDF a la vez Y asegura que todo sea TEXTO antes de comparar.
-    
-    Devuelve: (filas_netas_añadidas, filas_totales_finales)
-    """
+    """Ejecuta la extracción y cálculos (Optimizado en Memoria)."""
     if not extractors:
         raise RuntimeError(f"No se pudo importar 'extractors.py': {_import_err}")
     
-    # Usamos las columnas de la v3.1.8
     df_final = pd.DataFrame(columns=TARGET_COLS)
     len_inicial = 0
 
@@ -190,65 +211,50 @@ def run_extraction(pdf_paths: list[str], out_path: str, progress_callback, is_ap
         
         progress_callback(0.0, f"Leyendo {os.path.basename(out_path)}...")
         try:
-            # --- LÓGICA CLAVE v3.1.8 (Preservada) ---
-            # Leer TODAS las columnas como TEXTO (str)
             df_final = pd.read_excel(out_path, sheet_name="Datos", dtype=str)
             
-            # Limpiar los datos leídos para que coincidan con el formato de _rows_to_df
             for col in df_final.columns:
-                df_final[col] = df_final[col].astype(str).str.replace(r"\.0$", "", regex=True)
-                df_final[col] = df_final[col].str.replace(r"\s+", " ", regex=True).str.strip()
-                df_final[col] = df_final[col].replace({"None": "", "nan": ""})
-            # --- FIN LÓGICA v3.1.8 ---
+                df[col] = df_final[col].astype(str).str.replace(r"\.0$", "", regex=True)
+                df[col] = df_final[col].str.replace(r"\s+", " ", regex=True).str.strip()
+                df[col] = df[col].replace({"None": "", "nan": ""})
 
         except Exception as e:
             if "Permission denied" in str(e):
                  raise PermissionError(f"No se pudo leer el archivo. ¿Está '{os.path.basename(out_path)}' abierto?")
             raise ValueError(f"No se pudo leer la hoja 'Datos' del Excel. ¿Es el archivo correcto?\nError: {e}")
         
-        # Re-indexar con las columnas v3.1.8
         df_final = df_final.reindex(columns=TARGET_COLS)
         len_inicial = len(df_final)
 
-    # --- Bucle de Procesamiento (Optimización de RAM) ---
     total_files = len(pdf_paths)
     for i, p in enumerate(pdf_paths):
-        # Actualizar progreso (usa 80% del tiempo total para el bucle)
-        progress_val = (i + 1) / total_files * 0.8
+        progress_val = (i + 1) / max(1, total_files) * 0.8
         progress_callback(progress_val, f"Procesando {os.path.basename(p)} ({i+1}/{total_files})...")
         
         rows, by_page, method = extractors.parse_pdf_any(p, use_ocr=False)
         if not rows:
-            continue # Saltar archivo vacío
+            continue
         
-        # _rows_to_df (v3.1.8) ya convierte todo a TEXTO
         df_current_pdf = _rows_to_df(rows) 
         
         if not df_current_pdf.empty:
-            # Concatenar el DF pequeño al DF final
             df_final = pd.concat([df_final, df_current_pdf], ignore_index=True)
-    # --- Fin del Bucle ---
 
     if df_final.empty:
-        # No se procesó nada y no había nada antes
         return 0, 0 
 
     progress_callback(0.85, "Combinando datos y eliminando duplicados...")
-    
-    # ¡Ahora sí! drop_duplicates comparará TEXTO vs TEXTO (Lógica v3.1.8)
     df_final.drop_duplicates(inplace=True)
     
     len_final = len(df_final)
-    # Calculamos las filas NETAS que se añadieron
     filas_netas_añadidas = len_final - len_inicial
     filas_totales = len_final
     
     if filas_totales == 0:
-        # Esto puede pasar si los PDF solo contenían duplicados de un archivo viejo
         return 0, 0
 
     progress_callback(0.9, "Calculando resumen de vueltas...")
-    df_resumen = _calculate_vueltas(df_final) # ¡Se calcula sobre el DF final limpio!
+    df_resumen = _calculate_vueltas(df_final) 
 
     progress_callback(0.95, "Guardando archivo Excel...")
     try:
@@ -260,11 +266,96 @@ def run_extraction(pdf_paths: list[str], out_path: str, progress_callback, is_ap
     except Exception as e:
         raise e
 
-    # Devolvemos las filas NETAS añadidas y el total final
     return filas_netas_añadidas, filas_totales
 
+# --- DIÁLOGO DE ÉXITO (basado en CTkToplevel, tu fix) ---
+class SuccessDialog(ctk.CTkToplevel):
+    def __init__(self, parent, title, msg_summary, file_path, folder_path):
+        super().__init__(parent)
+        self.title(title)
+        self.folder_path = folder_path
+        self.geometry("550x220")
+        self.resizable(False, False)
 
-# ===== UI MODERNA v3.1.8 =====
+        self.transient(parent)
+        self.grab_set()
+
+        try:
+            if os.path.isfile(ICON_PATH):
+                self.iconbitmap(ICON_PATH)
+        except Exception:
+            pass
+
+        main_frame = ctk.CTkFrame(self, fg_color="transparent")
+        main_frame.pack(pady=20, padx=20, fill="both", expand=True)
+
+        msg_label = ctk.CTkLabel(
+            main_frame, text=msg_summary,
+            font=ctk.CTkFont(size=16),
+            wraplength=500, justify="left", anchor="w"
+        )
+        msg_label.pack(pady=(0, 10), fill="x")
+
+        path_label = ctk.CTkLabel(
+            main_frame, text="Archivo guardado en:",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            anchor="w"
+        )
+        path_label.pack(pady=(10, 0), fill="x")
+
+        path_entry = ctk.CTkEntry(main_frame)
+        path_entry.insert(0, file_path)
+        path_entry.configure(state="readonly")
+        path_entry.pack(pady=(5, 20), fill="x")
+
+        button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        button_frame.pack(fill="x")
+
+        close_btn = ctk.CTkButton(
+            button_frame, text="Cerrar",
+            command=self._close,
+            fg_color=("gray75", "gray25"),
+            text_color=("gray10", "gray90"),
+            hover_color=("gray85", "gray35")
+        )
+        close_btn.pack(side="right", padx=0)
+
+        open_btn = ctk.CTkButton(
+            button_frame, text="Abrir Carpeta",
+            command=self.open_folder,
+            font=ctk.CTkFont(weight="bold")
+        )
+        open_btn.pack(side="right", padx=(0, 10))
+
+        self.after(100, open_btn.focus_set)
+        self.bind("<Return>", lambda e: self._close())
+        self.bind("<Escape>", lambda e: self._close())
+
+        try:
+            self.update_idletasks()
+            x = parent.winfo_x() + (parent.winfo_width() // 2) - (self.winfo_width() // 2)
+            y = parent.winfo_y() + (parent.winfo_height() // 2) - (self.winfo_height() // 2)
+            self.geometry(f"+{max(0, x)}+{max(0, y)}")
+        except Exception:
+            pass
+
+    def open_folder(self):
+        if self.folder_path and os.path.exists(self.folder_path):
+            try:
+                os.startfile(self.folder_path)
+            except Exception as e:
+                mb.showerror("Error", f"No se pudo abrir la carpeta:\n{e}", parent=self)
+        self._close()
+
+    def _close(self):
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        self.destroy()
+
+
+# ===== UI MODERNA v3.5.1 (Flujo "Task-First" Corregido) =====
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -275,19 +366,25 @@ class App(ctk.CTk):
 
         self.title(APP_NAME)
         self.geometry("800x600")
-        self.minsize(720, 480)
+        self.minsize(720, 580)
+        try:
+            if os.path.isfile(ICON_PATH):
+                self.iconbitmap(ICON_PATH)
+        except Exception:
+            pass
 
         self.pdf_paths: List[str] = []
         self.last_output_folder: str | None = self.config_data.get("last_output_folder")
+        self.progress_queue: queue.Queue | None = None
 
-        self.grid_columnconfigure(0, weight=0) # Sidebar
-        self.grid_columnconfigure(1, weight=1) # Panel principal
+        self.grid_columnconfigure(0, weight=0)
+        self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # --- 1. Sidebar (Panel Izquierdo) ---
+        # --- 1. Sidebar (Panel Izquierdo - SÓLO GLOBAL) ---
         self.sidebar_frame = ctk.CTkFrame(self, width=240, corner_radius=0)
         self.sidebar_frame.grid(row=0, column=0, sticky="nsw")
-        self.sidebar_frame.grid_rowconfigure(4, weight=1) # Espacio de empuje
+        self.sidebar_frame.grid_rowconfigure(4, weight=1)
 
         self.title_lbl = ctk.CTkLabel(
             self.sidebar_frame, text=APP_NAME,
@@ -295,29 +392,6 @@ class App(ctk.CTk):
         )
         self.title_lbl.grid(row=0, column=0, padx=20, pady=(20, 10))
 
-        self.pick_btn = ctk.CTkButton(
-            self.sidebar_frame, text="Añadir PDF(s)",
-            command=self.pick_pdfs
-        )
-        self.pick_btn.grid(row=1, column=0, padx=20, pady=10)
-
-        self.clear_btn = ctk.CTkButton(
-            self.sidebar_frame, text="Limpiar Lista",
-            command=self.clear_list, 
-            fg_color=("gray75", "gray25"), 
-            text_color=("gray10", "gray90"), 
-            hover_color=("gray85", "gray35") 
-        )
-        self.clear_btn.grid(row=2, column=0, padx=20, pady=10)
-        
-        self.convert_btn = ctk.CTkButton(
-            self.sidebar_frame, text="Convertir a Excel",
-            font=ctk.CTkFont(size=16, weight="bold"),
-            height=40, command=self.on_convert_click
-        )
-        self.convert_btn.grid(row=3, column=0, padx=20, pady=(20, 10))
-
-        # Controles de apariencia (abajo)
         self.appearance_label = ctk.CTkLabel(
             self.sidebar_frame, text="Modo Oscuro:", anchor="w"
         )
@@ -338,110 +412,202 @@ class App(ctk.CTk):
         self.version_label.grid(row=7, column=0, padx=20, pady=(0, 10), sticky="w")
 
 
-        # --- 2. Panel Principal (Derecha) ---
-        self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
+        # --- 2. Panel Principal (Derecha - TODO EL FLUJO) ---
+        self.main_frame = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
         self.main_frame.grid_columnconfigure(0, weight=1)
-        self.main_frame.grid_rowconfigure(3, weight=1) # Fila 3 (Lista) crecerá
-
-        # Botón Segmentado (fila 0)
-        self.mode_label = ctk.CTkLabel(self.main_frame, text="Modo de Operación:")
-        self.mode_label.grid(row=0, column=0, sticky="w", padx=5, pady=(0, 5))
+        
+        # --- PASO 1: ¿QUÉ DESEAS HACER? ---
+        step1_label = ctk.CTkLabel(self.main_frame, text="Paso 1: ¿Qué deseas hacer?", font=ctk.CTkFont(size=16, weight="bold"), anchor="w")
+        step1_label.grid(row=0, column=0, sticky="ew", pady=(0, 5))
         
         self.mode_segmented_btn = ctk.CTkSegmentedButton(
             self.main_frame,
-            values=["Crear Nuevo", "Añadir"],
+            values=["Crear Excel Nuevo", "Añadir a Excel Existente"],
             command=self.toggle_mode
         )
-        self.mode_segmented_btn.set("Crear Nuevo") # Estado inicial
-        self.mode_segmented_btn.grid(row=1, column=0, sticky="ew", pady=(0, 20))
+        self.mode_segmented_btn.set("Crear Excel Nuevo")
+        self.mode_segmented_btn.grid(row=1, column=0, sticky="ew", pady=(5, 15))
 
+        
+        # --- Frame para PASO DE SALIDA (Guardar Como / Abrir) ---
+        self.step_output_frame = ctk.CTkFrame(self.main_frame)
+        self.step_output_frame.grid_columnconfigure(1, weight=1)
 
-        # Frame de "Guardar Como" (fila 2)
-        self.output_frame = ctk.CTkFrame(self.main_frame)
-        self.output_frame.grid(row=2, column=0, sticky="new", pady=(0, 20))
-        self.output_frame.grid_columnconfigure(1, weight=1)
-        
-        self.out_label = ctk.CTkLabel(self.output_frame, text="Guardar Excel como:")
-        self.out_label.grid(row=0, column=0, padx=(10, 5), pady=10)
-        
-        self.out_entry = ctk.CTkEntry(
-            self.output_frame, placeholder_text=DEFAULT_OUT
+        self.step_output_label = ctk.CTkLabel(
+            self.step_output_frame, text="Paso X",
+            font=ctk.CTkFont(size=16, weight="bold"), anchor="w"
         )
-        self.out_entry.grid(row=0, column=1, padx=5, pady=10, sticky="ew")
-        
-        if self.last_output_folder and os.path.exists(self.last_output_folder):
-            default_path = os.path.join(self.last_output_folder, DEFAULT_OUT)
-            self.out_entry.insert(0, default_path)
+        self.step_output_label.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 5), padx=10)
+
+        self.out_label = ctk.CTkLabel(self.step_output_frame, text="Guardar Excel como:")
+        self.out_label.grid(row=1, column=0, padx=(10, 5), pady=10, sticky="w")
+
+        self.out_entry = ctk.CTkEntry(self.step_output_frame, placeholder_text=DEFAULT_OUT)
+        self.out_entry_var = ctk.StringVar()
+        self.out_entry.configure(textvariable=self.out_entry_var)
+        self.out_entry.grid(row=1, column=1, padx=5, pady=10, sticky="ew")
 
         self.out_btn = ctk.CTkButton(
-            self.output_frame, text="Examinar…",
+            self.step_output_frame, text="Examinar…",
             width=120, command=self.pick_output
         )
-        self.out_btn.grid(row=0, column=2, padx=(5, 10), pady=10)
+        self.out_btn.grid(row=1, column=2, padx=(5, 10), pady=10, sticky="e")
+        
+        # --- Frame para PASO DE PDFs ---
+        self.step_pdf_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
 
-
-        # Lista Interactiva (fila 3)
-        self.files_scrollable_frame = ctk.CTkScrollableFrame(
-            self.main_frame, border_width=1, border_color=("gray85", "gray25")
+        self.step_pdf_label = ctk.CTkLabel(self.step_pdf_frame, text="Paso X: Seleccionar Archivos", font=ctk.CTkFont(size=16, weight="bold"), anchor="w")
+        self.step_pdf_label.pack(fill="x", pady=(0, 5))
+        
+        self.pick_btn = ctk.CTkButton(
+            self.step_pdf_frame, text="Añadir PDF(s)",
+            command=self.pick_pdfs
         )
-        self.files_scrollable_frame.grid(row=3, column=0, sticky="nsew", pady=(0, 20))
+        self.pick_btn.pack(side="left", padx=(0, 10))
+
+        self.clear_btn = ctk.CTkButton(
+            self.step_pdf_frame, text="Limpiar Lista",
+            command=self.clear_list, 
+            fg_color=("gray75", "gray25"), 
+            text_color=("gray10", "gray90"), 
+            hover_color=("gray85", "gray35") 
+        )
+        self.clear_btn.pack(side="left")
+
+        # --- Frame para PASO DE COLA DE ARCHIVOS ---
+        self.step_queue_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.step_queue_label = ctk.CTkLabel(self.step_queue_frame, text="Paso X: Archivos en Cola", font=ctk.CTkFont(size=16, weight="bold"), anchor="w")
+        self.step_queue_label.pack(fill="x", pady=(10, 5))
+        
+        self.files_scrollable_frame = ctk.CTkScrollableFrame(
+            self.step_queue_frame, border_width=1, border_color=("gray85", "gray25"), height=150
+        )
+        self.files_scrollable_frame.pack(fill="x", expand=True, pady=(0, 15))
         
         self.initial_list_label = ctk.CTkLabel(
             self.files_scrollable_frame, text="Archivos seleccionados aparecerán aquí..."
         )
         self.initial_list_label.pack(pady=10)
-
-        # Estado (fila 4)
-        self.status_label = ctk.CTkLabel(self.main_frame, text="Listo.", anchor="w")
-        self.status_label.grid(row=4, column=0, sticky="w", padx=5)
-
-        # Botón de Abrir Carpeta (fila 5)
-        self.open_folder_btn = ctk.CTkButton(
-            self.main_frame, 
-            text="Abrir Carpeta de Salida", 
-            command=self.open_output_folder,
-            fg_color=("gray75", "gray25"), 
-            text_color=("gray10", "gray90"), 
-            hover_color=("gray85", "gray35") 
+        
+        # --- Frame para PASO FINAL: CONVERTIR ---
+        self.step_convert_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        
+        self.step_convert_label = ctk.CTkLabel(self.step_convert_frame, text="Paso X: Convertir", font=ctk.CTkFont(size=16, weight="bold"), anchor="w")
+        self.step_convert_label.pack(fill="x", pady=(10, 5))
+        
+        self.convert_btn = ctk.CTkButton(
+            self.step_convert_frame, text="Convertir a Excel",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            height=40, command=self.on_convert_click
         )
-        self.open_folder_btn.grid(row=5, column=0, sticky="w", padx=5, pady=(5, 0))
-        self.open_folder_btn.grid_remove() # Oculto al inicio
+        self.convert_btn.pack(fill="x", pady=(5, 10))
 
-        # Barra de progreso (fila 6)
-        self.progress_bar = ctk.CTkProgressBar(self.main_frame)
-        self.progress_bar.grid(row=6, column=0, sticky="ew", pady=(5, 0))
+        self.status_label = ctk.CTkLabel(self.step_convert_frame, text="Listo.", anchor="w")
+        self.status_label.pack(fill="x", padx=5)
+
+        self.progress_bar = ctk.CTkProgressBar(self.step_convert_frame)
+        self.progress_bar.pack(fill="x", pady=(5, 15))
         self.progress_bar.set(0)
 
-        # Chequeo inicial
+        # --- Chequeo inicial ---
         if not extractors:
             mb.showwarning(
                 "Extractor no encontrado",
                 f"No se pudo importar 'extractors.py'.\n\nDetalles: {_import_err}"
             )
-            self.convert_btn.configure(state="disabled")
-
-        # Iniciar la comprobación de actualizaciones
+        
         self.check_for_updates()
+        self.toggle_mode("Crear Excel Nuevo")
 
-        self.progress_queue = None
+    # ==========================================================
+    #  EL RESTO DE FUNCIONES DE LA CLASE
+    # ==========================================================
+
+    # --- FUNCIÓN "GUARDIA" (v3.5.1 - CORREGIDA) ---
+    def _update_ui_state(self):
+        """
+        HABILITA/DESHABILITA y REORDENA los pasos de la GUI 
+        basado en el modo seleccionado.
+        """
+        mode = self.mode_segmented_btn.get()
+        has_files = bool(self.pdf_paths)
+        has_output_path = bool(self.out_entry_var.get().strip())
+        
+        self.step_output_frame.grid_remove()
+        self.step_pdf_frame.grid_remove()
+        self.step_queue_frame.grid_remove()
+        self.step_convert_frame.grid_remove()
+        
+        current_row = 2
+
+        if mode == "Crear Excel Nuevo":
+            # --- Flujo CREAR ---
+            self.step_pdf_label.configure(text="Paso 2: Seleccionar Archivos PDF")
+            self.step_queue_label.configure(text="Paso 3: Archivos en Cola")
+            self.step_output_label.configure(text="Paso 4: Guardar Excel Como...")
+            self.step_convert_label.configure(text="Paso 5: Convertir")
+            
+            self.out_label.configure(text="Guardar Excel como:")
+            self.out_btn.configure(text="Examinar…")
+            self.convert_btn.configure(text="Crear Excel Nuevo")
+            
+            # 2. Reordenar
+            self.step_pdf_frame.grid(row=current_row, column=0, sticky="ew", pady=(0, 15)); current_row += 1
+            self.step_queue_frame.grid(row=current_row, column=0, sticky="ew"); current_row += 1
+            self.step_output_frame.grid(row=current_row, column=0, sticky="ew", pady=(0, 15)); current_row += 1
+            self.step_convert_frame.grid(row=current_row, column=0, sticky="ew"); current_row += 1
+            
+            # 3. Habilitar/Deshabilitar (LÓGICA CORREGIDA)
+            self.pick_btn.configure(state="normal")
+            self.clear_btn.configure(state="normal")
+            
+            # Paso 4 (Salida) SIEMPRE habilitado en "Crear Excel Nuevo" (mejor UX)
+            self.out_label.configure(state="normal")
+            self.out_entry.configure(state="normal")
+            self.out_btn.configure(state="normal")
+            
+            # Paso 5 (Convertir) solo si hay PDFs Y Salida
+            state_step5 = "normal" if (has_files and has_output_path) else "disabled"
+            self.convert_btn.configure(state=state_step5)
+
+        else: # mode == "Añadir a Excel Existente"
+            # --- Flujo AÑADIR ---
+            self.step_output_label.configure(text="Paso 2: Seleccionar Excel Existente")
+            self.step_pdf_label.configure(text="Paso 3: Seleccionar Archivos PDF")
+            self.step_queue_label.configure(text="Paso 4: Archivos en Cola")
+            self.step_convert_label.configure(text="Paso 5: Añadir a Excel")
+
+            self.out_label.configure(text="Añadir a Excel:")
+            self.out_btn.configure(text="Abrir...")
+            self.convert_btn.configure(text="Añadir a Excel")
+
+            # 2. Reordenar
+            self.step_output_frame.grid(row=current_row, column=0, sticky="ew", pady=(0, 15)); current_row += 1
+            self.step_pdf_frame.grid(row=current_row, column=0, sticky="ew", pady=(0, 15)); current_row += 1
+            self.step_queue_frame.grid(row=current_row, column=0, sticky="ew"); current_row += 1
+            self.step_convert_frame.grid(row=current_row, column=0, sticky="ew"); current_row += 1
+            
+            # 3. Habilitar/Deshabilitar
+            self.out_label.configure(state="normal")
+            self.out_entry.configure(state="normal")
+            self.out_btn.configure(state="normal")
+
+            # Paso 3 (PDFs) solo habilitado si hay Excel de salida
+            state_step3 = "normal" if has_output_path else "disabled"
+            self.pick_btn.configure(state=state_step3)
+            self.clear_btn.configure(state=state_step3)
+
+            # Paso 5 (Convertir) solo si hay PDFs Y Salida
+            state_step5 = "normal" if (has_files and has_output_path) else "disabled"
+            self.convert_btn.configure(state=state_step5)
 
     # ===== Acciones =====
     
     def _save_config_data(self):
-        """Helper para guardar la config actual en el .json"""
         self.config_data['theme_mode'] = self.theme_mode
         self.config_data['last_output_folder'] = self.last_output_folder
         _save_config(self.config_data)
-
-    def open_output_folder(self):
-        if self.last_output_folder and os.path.exists(self.last_output_folder):
-            try:
-                os.startfile(self.last_output_folder)
-            except Exception as e:
-                mb.showerror("Error", f"No se pudo abrir la carpeta:\n{e}")
-        else:
-            mb.showwarning("Error", "La ruta de la carpeta no se encontró o ya no existe.")
 
     def toggle_theme(self):
         self.theme_mode = "dark" if self.theme_switch.get() == 1 else "light"
@@ -449,51 +615,43 @@ class App(ctk.CTk):
         self._save_config_data()
 
     def toggle_mode(self, mode: str):
-        if mode == "Añadir":
-            self.out_label.configure(text="Añadir a Excel:")
-            self.out_btn.configure(text="Abrir...")
-            self.pick_output(is_open_dialog=True) 
-        else: 
-            self.out_label.configure(text="Guardar Excel como:")
-            self.out_btn.configure(text="Examinar…")
-            if self.last_output_folder and os.path.exists(self.last_output_folder):
-                default_path = os.path.join(self.last_output_folder, DEFAULT_OUT)
-                self.out_entry.delete(0, "end")
-                self.out_entry.insert(0, default_path)
+        self.pdf_paths = []
+        self.out_entry_var.set("")
+        self.update_file_list(reset_status=False)
+        self._update_ui_state()
+        
+        if mode == "Añadir a Excel Existente":
+            self.pick_output(is_open_dialog=True)
+        elif self.last_output_folder and os.path.exists(self.last_output_folder):
+            default_path = os.path.join(self.last_output_folder, DEFAULT_OUT)
+            self.out_entry_var.set(default_path)
+            self._update_ui_state() # Llamada extra para actualizar el estado con la nueva ruta
 
     def update_file_list(self, reset_status: bool = True):
         for widget in self.files_scrollable_frame.winfo_children():
             widget.destroy()
-
         if not self.pdf_paths:
-            label = ctk.CTkLabel(
-                self.files_scrollable_frame, text="No hay archivos seleccionados."
-            )
+            label = ctk.CTkLabel(self.files_scrollable_frame, text="No hay archivos seleccionados.")
             label.pack(pady=10)
         else:
             for path in self.pdf_paths:
                 row_frame = ctk.CTkFrame(self.files_scrollable_frame, fg_color="transparent")
                 row_frame.pack(fill="x", padx=5, pady=2)
-                
                 remove_btn = ctk.CTkButton(
                     row_frame, text="X", width=30, height=30,
                     fg_color=("gray75", "gray25"), text_color=("gray10", "gray90"),
                     command=lambda p=path: self.remove_file(p)
                 )
                 remove_btn.pack(side="left", padx=(0, 10))
-                
                 filename = os.path.basename(path)
                 if len(filename) > 60:
                     filename = filename[:30] + "..." + filename[-30:]
-                
-                label = ctk.CTkLabel(
-                    row_frame, text=filename, anchor="w"
-                )
+                label = ctk.CTkLabel(row_frame, text=filename, anchor="w")
                 label.pack(side="left", fill="x", expand=True)
-
         if reset_status:
-            self.open_folder_btn.grid_remove()
-            self.status_label.grid() 
+            # --- INICIO DE LA CORRECCIÓN (v3.5.3) ---
+            self.status_label.pack(fill="x", padx=5) # Usar .pack() en lugar de .grid()
+            # --- FIN DE LA CORRECCIÓN ---
             self.status_label.configure(text=f"Listo. {len(self.pdf_paths)} archivos en la lista.")
 
     def remove_file(self, path_to_remove: str):
@@ -501,8 +659,10 @@ class App(ctk.CTk):
             self.pdf_paths.remove(path_to_remove)
         except ValueError:
             print(f"Error: no se pudo quitar {path_to_remove}")
-        self.update_file_list(reset_status=True) 
+        self.update_file_list(reset_status=True)
+        self._update_ui_state()
 
+    # --- MODIFICADO (v3.5.2): Lógica de estado sincronizada ---
     def pick_pdfs(self):
         paths = fd.askopenfilenames(
             title="Selecciona PDF(s) para extraer",
@@ -510,114 +670,97 @@ class App(ctk.CTk):
         )
         if not paths:
             return
-        
         new_paths_added = 0
         for p in paths:
             if p not in self.pdf_paths:
                 self.pdf_paths.append(p)
                 new_paths_added += 1
-        
         if new_paths_added > 0:
-            self.update_file_list(reset_status=True) 
+            self.update_file_list(reset_status=True)
             self.progress_bar.set(0)
         
-        if not self.out_entry.get() and self.mode_segmented_btn.get() == "Crear Nuevo":
+        # 1. Actualizar estado (habilita Paso 4 de Salida)
+        self._update_ui_state()
+        
+        # 2. Rellenar ruta de salida por defecto (si aplica)
+        if not self.out_entry_var.get() and self.mode_segmented_btn.get() == "Crear Excel Nuevo":
             base_dir = self.last_output_folder
             if not base_dir or not os.path.exists(base_dir):
                 base_dir = os.path.dirname(self.pdf_paths[0])
             out_path = os.path.join(base_dir, DEFAULT_OUT)
-            self.out_entry.delete(0, "end")
-            self.out_entry.insert(0, out_path)
+            self.out_entry_var.set(out_path)
+            
+            # Sincroniza el estado, igual que hace pick_output()
+            self.last_output_folder = base_dir 
+            self._save_config_data()
+            
+            # 3. Actualizar estado DE NUEVO (ahora habilita Paso 5 de Convertir)
+            self._update_ui_state()
 
     def clear_list(self):
         self.pdf_paths = []
-        self.update_file_list(reset_status=True) 
+        self.update_file_list(reset_status=True)
         self.progress_bar.set(0)
+        self._update_ui_state()
 
+    # --- MODIFICADO (v3.5.1): Lógica de trace eliminada ---
     def pick_output(self, is_open_dialog=False):
         initial_dir = self.last_output_folder or os.path.expanduser("~")
-
-        if self.mode_segmented_btn.get() == "Añadir" or is_open_dialog:
-            out = fd.askopenfilename(
+        if self.mode_segmented_btn.get() == "Añadir a Excel Existente" or is_open_dialog:
+            out = fd.askopenfilenames(
                 title="Seleccionar Excel para añadir datos",
                 filetypes=[("Excel", "*.xlsx")],
                 initialdir=initial_dir
             )
+            if out:
+                out = out[0]
         else:
             out = fd.asksaveasfilename(
                 title="Guardar Excel como",
                 defaultextension=".xlsx",
                 filetypes=[("Excel", ".xlsx")],
-                initialfile=self.out_entry.get() or DEFAULT_OUT,
+                initialfile=self.out_entry_var.get() or DEFAULT_OUT,
                 initialdir=initial_dir
             )
-            
         if out:
-            self.out_entry.delete(0, "end")
-            self.out_entry.insert(0, out)
+            self.out_entry_var.set(out) # Establecer el valor
             self.last_output_folder = os.path.dirname(out)
             self._save_config_data()
+            self._update_ui_state() # Llamar al guardia DESPUÉS de set
 
+    # --- Cola/Threads ---
     def check_queue(self):
-        """
-        Revisa la cola (queue) cada 100ms para mensajes del hilo de trabajo.
-        Se ejecuta en el HILO PRINCIPAL de la GUI.
-        """
         try:
-            # Revisa todos los mensajes que haya en la cola
             while not self.progress_queue.empty():
-                
-                # Saca un mensaje
-                # Usamos *msg_data para "desempacar" el resto de argumentos
                 msg_type, *msg_data = self.progress_queue.get_nowait()
-
-                # Procesa el mensaje según su tipo
                 if msg_type == "progress":
                     value, text = msg_data
                     self.progress_bar.set(value)
                     self.status_label.configure(text=text)
-                
                 elif msg_type == "success":
                     msg, full_out_path, filas_totales = msg_data
-                    # ¡Trabajo terminado! Llamamos a handle_success
                     self.handle_success(msg, full_out_path, filas_totales)
-                    return # <-- IMPORTANTE: Detiene el bucle de "after"
-                
+                    return
                 elif msg_type == "error":
-                    error_msg, = msg_data # Desempaca el único argumento
-                    # ¡Trabajo terminado (con error)! Llamamos a handle_error
+                    error_msg, = msg_data
                     self.handle_error(error_msg)
-                    return # <-- IMPORTANTE: Detiene el bucle de "after"
-
+                    return
         except queue.Empty:
-            # Es normal que la cola esté vacía la mayoría del tiempo
             pass
         except Exception as e:
-            # Un error inesperado procesando la cola
             self.handle_error(f"Error interno de la GUI: {e}")
-            return # Detiene el bucle
-
-        # Si no hemos terminado (ni éxito ni error),
-        # le decimos a la GUI que vuelva a revisar en 100ms
+            return
         self.after(100, self.check_queue)
 
-    # Tarea de extracción que se ejecuta en el hilo (AHORA USA COLA)
     def run_extraction_task(self, pdf_paths, out_path, is_append, progress_queue: queue.Queue):
         try:
-            # 1. Creamos un "callback" que PUEDE usar el hilo
-            # Este callback simple solo pone mensajes en la cola
             def thread_progress_callback(value, text):
                 progress_queue.put(("progress", value, text))
-
-            # 2. Ejecutamos la extracción (que es pesada)
             (filas_netas_añadidas, filas_totales) = run_extraction(
-                pdf_paths, 
-                out_path,
-                progress_callback=thread_progress_callback, # <-- Pasamos el nuevo callback
+                pdf_paths, out_path,
+                progress_callback=thread_progress_callback,
                 is_append_mode=is_append
             )
-            
-            # 3. Creamos el mensaje de éxito
             if is_append:
                 if filas_netas_añadidas > 0:
                     msg = f"¡Completado! Se añadieron {filas_netas_añadidas} filas nuevas (netas).\nTotal de filas ahora: {filas_totales}."
@@ -627,199 +770,169 @@ class App(ctk.CTk):
                     msg = "¡Completado! No se encontraron datos válidos."
             else:
                 msg = f"¡Completado! Se guardaron {filas_totales} filas."
-            
             full_out_path = os.path.abspath(out_path)
-            
-            # 4. Ponemos el mensaje de éxito en la cola
             progress_queue.put(("success", msg, full_out_path, filas_totales))
-            
         except Exception as e:
-            # 5. Si algo falla, ponemos el mensaje de error en la cola
             tb_text = traceback.format_exc()
-            _log_error(e, tb_text) 
+            _log_error(e, tb_text)
             progress_queue.put(("error", str(e)))
 
-    # Funciones llamadas por `self.after` (hilo principal)
     def handle_success(self, msg, full_out_path, filas_totales):
-        """Se ejecuta en el hilo principal al tener éxito."""
         self.progress_bar.set(1.0)
         self.status_label.configure(text=f"¡Éxito! ({filas_totales} filas)")
-        
         self.last_output_folder = os.path.dirname(full_out_path)
-        self.open_folder_btn.grid() 
-
-        mb.showinfo("Listo", f"{msg}\nArchivo: {full_out_path}")
+        
+        dialog = SuccessDialog(self, title="Conversión Exitosa",
+                               msg_summary=msg,
+                               file_path=full_out_path,
+                               folder_path=self.last_output_folder)
+        self.wait_window(dialog) # Usar self.wait_window para un popup modal
         
         self.pdf_paths = []
-        self.update_file_list(reset_status=False) 
-        
-        self.reenable_buttons() 
+        self.update_file_list(reset_status=False)
+        self.out_entry_var.set("") # Limpiar la ruta
+        self.reenable_buttons()
 
     def handle_error(self, error_msg: str):
-        """Se ejecuta en el hilo principal al fallar."""
         self.progress_bar.set(0)
-        
-        # --- ¡CORREGIDO! ---
-        # Detectar el error de "Archivo Abierto"
         if "No se pudo guardar el archivo" in error_msg or "No se pudo leer el archivo" in error_msg:
-             friendly_msg = "Error: El archivo Excel está abierto. Ciérralo y reintenta."
-             self.status_label.configure(text=friendly_msg)
-             mb.showerror("Archivo Bloqueado", friendly_msg.replace("Error: ", ""))
+            friendly_msg = "Error: El archivo Excel está abierto. Ciérralo y reintenta."
+            self.status_label.configure(text=friendly_msg)
+            mb.showerror("Archivo Bloqueado", friendly_msg.replace("Error: ", ""))
         else:
-             # Cualquier otro error
-             self.status_label.configure(text="Error. Revisa CONVERSION_ERROR.log")
-        
-        self.open_folder_btn.grid_remove()
-        
-        self.reenable_buttons() 
+            self.status_label.configure(text="Error. Revisa CONVERSION_ERROR.log")
+        self.reenable_buttons()
 
     def reenable_buttons(self):
-        """Se ejecuta en el hilo principal SIEMPRE al finalizar."""
         self.progress_bar.stop()
         self.progress_bar.configure(mode="determinate")
-        self.convert_btn.configure(state="normal", text="Convertir a Excel")
-        self.pick_btn.configure(state="normal")
-        self.clear_btn.configure(state="normal")
+        
+        # Habilitar el control maestro (Paso 1)
         self.mode_segmented_btn.configure(state="normal")
-        self.out_btn.configure(state="normal") 
+        
+        # Dejar que el "guardia" decida el estado del resto
+        self._update_ui_state()
 
-    # on_convert_click ahora INICIA el hilo y el OYENTE
     def on_convert_click(self):
+        out = self.out_entry_var.get().strip()
+        is_append = self.mode_segmented_btn.get() == "Añadir a Excel Existente"
+        
         if not self.pdf_paths:
             mb.showwarning("Faltan PDFs", "Primero selecciona uno o varios PDF.")
             return
-
-        out = self.out_entry.get().strip()
-        is_append = self.mode_segmented_btn.get() == "Añadir"
-        
         if not out:
-            if is_append:
-                mb.showwarning("Falta Excel", "Selecciona un archivo Excel al cual añadir datos.")
-                return
-            else:
-                base_dir = self.last_output_folder or os.path.dirname(self.pdf_paths[0])
-                out = os.path.join(base_dir, DEFAULT_OUT)
-        
+            mb.showwarning("Falta Ruta", "Define un archivo de Excel de salida.")
+            return
+            
         if not out.lower().endswith(".xlsx"):
             out += ".xlsx"
-
-        self.out_entry.delete(0, "end")
-        self.out_entry.insert(0, out)
+            self.out_entry_var.set(out)
         
         self.last_output_folder = os.path.dirname(out)
         self._save_config_data()
-
-        self.open_folder_btn.grid_remove()
-        self.status_label.grid() 
+        
+        # --- INICIO DE LA CORRECCIÓN (v3.5.3) ---
+        self.status_label.pack(fill="x", padx=5) # Usar .pack() en lugar de .grid()
+        # --- FIN DE LA CORRECCIÓN ---
         self.status_label.configure(text="Iniciando...")
-
-        # Desactivar botones
+        
+        # Desactivar TODOS los botones
         self.convert_btn.configure(state="disabled", text="Procesando...")
         self.pick_btn.configure(state="disabled")
         self.clear_btn.configure(state="disabled")
         self.mode_segmented_btn.configure(state="disabled")
-        self.out_btn.configure(state="disabled") 
-
-        # Iniciar animación
+        self.out_btn.configure(state="disabled")
+        self.out_entry.configure(state="disabled")
+        
         self.progress_bar.set(0)
         self.progress_bar.configure(mode="indeterminate")
         self.progress_bar.start()
-
-        # --- LÓGICA DE COLA (QUEUE) ---
-        # 1. Crear la cola
-        self.progress_queue = queue.Queue()
         
-        # 2. Iniciar el hilo de trabajo, pasándole la cola
+        self.progress_queue = queue.Queue()
         threading.Thread(
-            target=self.run_extraction_task, 
-            args=(self.pdf_paths, out, is_append, self.progress_queue), # <-- Cola añadida
+            target=self.run_extraction_task,
+            args=(self.pdf_paths, out, is_append, self.progress_queue),
             daemon=True
         ).start()
-        
-        # 3. Iniciar el "oyente" de la cola en el hilo principal
         self.after(100, self.check_queue)
 
-    # --- Funciones de Auto-Actualización ---
-    
+    # --- Auto-Actualización ---
     def check_for_updates(self):
-        """Inicia un hilo para verificar actualizaciones sin congelar la GUI."""
         self.status_label.configure(text="Buscando actualizaciones...")
         threading.Thread(target=self._update_check_thread, daemon=True).start()
 
     def _update_check_thread(self):
-        """Hilo de trabajo que contacta la API de GitHub."""
         try:
             response = requests.get(GITHUB_REPO_API, timeout=5)
-            response.raise_for_status() 
-            
+            response.raise_for_status()
             data = response.json()
-            latest_tag = data['tag_name'] 
-            
-            # --- MODIFICADO: Usar packaging.version ---
+            latest_tag = data['tag_name']
             if Version(latest_tag) > Version(APP_CURRENT_VERSION):
                 download_url = None
-                for asset in data['assets']:
-                    if asset['name'].startswith("Setup-DataBridge"):
-                        download_url = asset['browser_download_url']
+                for asset in data.get('assets', []):
+                    if asset.get('name', '').startswith("Setup-DataBridge"):
+                        download_url = asset.get('browser_download_url')
                         break
-                
                 if download_url:
                     self.after(0, self.ask_user_to_update, latest_tag, download_url)
                 else:
                     self.after(0, self.status_label.configure, {"text": "Listo."})
             else:
                 self.after(0, self.status_label.configure, {"text": "Estás al día. Listo."})
-
         except Exception as e:
             print(f"No se pudo verificar actualizaciones: {e}")
             self.after(0, self.status_label.configure, {"text": "No se pudo verificar act. Listo."})
 
     def ask_user_to_update(self, new_version, download_url):
-        """Muestra el popup de sí/no en el hilo principal."""
-        if mb.askyesno("¡Actualización Disponible!", 
-                        f"Hay una nueva versión ({new_version}) de DataBridge.\n"
-                        f"Tú tienes la {APP_CURRENT_VERSION}.\n\n"
-                        "¿Quieres descargarla e instalarla ahora?"):
-            
-            # Desactivar botones y mostrar descarga
+        if mb.askyesno("¡Actualización Disponible!",
+                       f"Hay una nueva versión ({new_version}) de DataBridge.\n"
+                       f"Tú tienes la {APP_CURRENT_VERSION}.\n\n"
+                       "¿Quieres descargarla e instalarla ahora?"):
             self.status_label.configure(text=f"Descargando {new_version}...")
             self.progress_bar.configure(mode="indeterminate")
             self.progress_bar.start()
+            
+            # Deshabilitar todos los controles
             self.convert_btn.configure(state="disabled")
             self.pick_btn.configure(state="disabled")
             self.clear_btn.configure(state="disabled")
             self.mode_segmented_btn.configure(state="disabled")
-            self.out_btn.configure(state="disabled") 
-
-            threading.Thread(target=self._download_and_install_thread, 
-                             args=(download_url, new_version), 
+            self.out_btn.configure(state="disabled")
+            self.out_entry.configure(state="disabled")
+            
+            threading.Thread(target=self._download_and_install_thread,
+                             args=(download_url, new_version),
                              daemon=True).start()
 
     def _download_and_install_thread(self, url, new_version):
-        """Hilo de trabajo que descarga y ejecuta el instalador."""
         try:
-            temp_path = os.path.join(os.getenv('TEMP'), f"Setup-DataBridge-{new_version}.exe")
-            
+            temp_dir = os.getenv('TEMP') or os.path.expanduser("~")
+            temp_path = os.path.join(temp_dir, f"Setup-DataBridge-{new_version}.exe")
             with requests.get(url, stream=True) as r:
                 r.raise_for_status()
                 with open(temp_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192): 
+                    for chunk in r.iter_content(chunk_size=8192):
                         f.write(chunk)
-            
             self.after(0, self.status_label.configure, {"text": "Instalando... La app se reiniciará."})
-            
             subprocess.Popen([temp_path, '/SILENT'])
-            self.after(1000, self.destroy) 
-
+            self.after(1000, self.destroy)
         except Exception as e:
             self.after(0, self.status_label.configure, {"text": "Error al descargar la actualización."})
             self.after(0, self.progress_bar.stop)
             self.after(0, self.progress_bar.configure, {"mode": "determinate"})
             self.after(0, mb.showerror, ("Error de Actualización", f"No se pudo descargar el instalador:\n{e}"))
-            self.after(0, self.reenable_buttons) # Reactivar botones si la descarga falla 
+            self.after(0, self.reenable_buttons)
 
-
+# --- Bloque de ejecución principal ---
 def main():
+    # Establecer DPI awareness para que se vea nítido
+    try:
+        if sys.platform == "win32":
+            from ctypes import windll
+            windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        pass
+        
     app = App()
     app.mainloop()
 
@@ -830,8 +943,7 @@ if __name__ == "__main__":
         tb_text = traceback.format_exc()
         log_filename = "STARTUP_ERROR.log"
         try:
-            base_path = os.path.dirname(__file__)
-            log_path = os.path.join(base_path, log_filename)
+            log_path = os.path.join(APP_ROOT, log_filename)
             with open(log_path, "w", encoding="utf-8") as f:
                 f.write(tb_text)
         except Exception:
