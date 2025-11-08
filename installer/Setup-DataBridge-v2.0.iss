@@ -1,52 +1,52 @@
-; Setup-DataBridge-v3.1.2.iss
-; Instalador oficial de DataBridge - creado por Leonardo Riveros
-
-#define MyAppName "DataBridge"
-#define MyAppVersion "3.1.2"
-#define MyAppPublisher "Leonardo Riveros"
-#define MyAppExeName "DataBridge.exe"
-#define MyAppIcon "C:\Proyectos\DataBridge\assets\app.ico"
+; Script de Inno Setup para DataBridge
+; Guarda esto como 'DataBridge_setup.iss' (por ejemplo)
 
 [Setup]
-AppId={{E7A64F10-3C6B-42A4-99E3-DBB58A9B9C1F}}
-AppName={#MyAppName}
-AppVersion={#MyAppVersion}
-AppPublisher={#MyAppPublisher}
-DefaultDirName={pf}\{#MyAppName}
-DefaultGroupName={#MyAppName}
-DisableProgramGroupPage=yes
-OutputDir=.
-OutputBaseFilename=Setup-DataBridge-v3.1.2
+; --- Info de la App ---
+AppName=DataBridge
+AppVersion=3.2.0
+AppPublisher=Leonardo Riveros
+; AppPublisherURL=tu-sitio-web.com
+; AppSupportURL=tu-sitio-web.com
+
+; --- Destino de Instalación ---
+; {autopf} se resuelve a "C:\Program Files (x86)" o "C:\Program Files"
+DefaultDirName={autopf}\DataBridge
+
+; --- Nombres de Archivo ---
+; El nombre del instalador que se generará
+OutputBaseFilename=Setup-DataBridge-v3.2.0
+; Dónde guardar el instalador (en tu carpeta 'installer')
+OutputDir=.\
+; El ícono para el instalador
+SetupIconFile=..\assets\app.ico
+; El ícono para Desinstalar (en Panel de Control)
+UninstallDisplayIcon=..\assets\app.ico
+
+; --- Opciones de Instalación ---
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
-PrivilegesRequired=admin
-ArchitecturesInstallIn64BitMode=x64
-SetupIconFile={#MyAppIcon}
-
-UninstallDisplayIcon={app}\{#MyAppExeName}
-UninstallDisplayName={#MyAppName}
 
 [Languages]
 Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 
+[Tasks]
+; Opcional: Permite al usuario crear un ícono de escritorio
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}";
+
 [Files]
-; Copia el ejecutable y todas las dependencias necesarias
-Source: "C:\Proyectos\DataBridge\dist\DataBridge\*"; \
-    DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; --- ¡ESTA ES LA PARTE MÁS IMPORTANTE! ---
+; Le dice a Inno Setup que copie TODO el contenido de tu carpeta 'dist\DataBridge'
+; al directorio de instalación del usuario.
+
+Source: "..\dist\DataBridge\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; NOTA: "..\dist\DataBridge\*" asume que guardas este .iss dentro de la carpeta 'installer'
 
 [Icons]
-; Accesos con el ícono personalizado
-Name: "{group}\{#MyAppName}"; \
-    Filename: "{app}\{#MyAppExeName}"; \
-    IconFilename: "{#MyAppIcon}"
+; --- Iconos del Menú Inicio ---
+Name: "{autoprograms}\DataBridge"; Filename: "{app}\DataBridge.exe"
+Name: "{autoprograms}\Desinstalar DataBridge"; Filename: "{uninstallexe}"
 
-Name: "{commondesktop}\{#MyAppName}"; \
-    Filename: "{app}\{#MyAppExeName}"; \
-    IconFilename: "{#MyAppIcon}"
-
-[Run]
-; Ejecutar la aplicación al finalizar la instalación
-Filename: "{app}\{#MyAppExeName}"; \
-    Description: "Iniciar {#MyAppName}"; \
-    Flags: nowait postinstall skipifsilent
+; --- Icono de Escritorio (Opcional) ---
+Name: "{autodesktop}\DataBridge"; Filename: "{app}\DataBridge.exe"; Tasks: desktopicon

@@ -3,6 +3,13 @@
 import os
 import sys
 
+# --- INICIO DE RUTAS ROBUSTAS ---
+# project_root será la carpeta donde está este archivo .spec (ej: C:\Proyectos\DataBridge)
+project_root = os.getcwd()
+src_dir = os.path.join(project_root, 'src')
+# --- FIN DE RUTAS ROBUSTAS ---
+
+
 # --- INICIO DE LA CORRECCIÓN DE PDFMINER (para Excel en blanco) ---
 try:
     import pdfminer
@@ -18,8 +25,9 @@ pdfminer_datas = (pdfminer_cmap_path, 'pdfminer/cmap')
 
 
 # --- INICIO DE LA CONFIGURACIÓN DEL ICONO ---
-app_icon_path = 'assets\\app.ico'
-app_icon_datas = ('assets', 'assets') # Empaqueta toda la carpeta 'assets'
+# Usamos las rutas robustas
+app_icon_path = os.path.join(project_root, 'assets', 'app.ico')
+app_icon_datas = (os.path.join(project_root, 'assets'), 'assets') # Empaqueta toda la carpeta 'assets'
 # --- FIN DE LA CONFIGURACIÓN DEL ICONO ---
 
 
@@ -27,20 +35,27 @@ app_icon_datas = ('assets', 'assets') # Empaqueta toda la carpeta 'assets'
 block_cipher = None
 
 a = Analysis(
-    ['gui.py'],  # Tu script principal
-    pathex=['C:\\Proyectos\\DataBridge'], # Ruta a tu proyecto
+  
+    [os.path.join(src_dir, 'gui.py')],  # <-- MODIFICADO: Apunta al script dentro de src/
+  
+    pathex=[
+        project_root, # <-- MODIFICADO: Añadimos el root (para el hook)
+        src_dir       # <-- MODIFICADO: Añadimos src/ (para los imports)
+    ],
+  
     binaries=[],
     
     datas=[
         pdfminer_datas, 
-        app_icon_datas
+        app_icon_datas    # <-- MODIFICADO: Usa la variable robusta
     ],
     
     hiddenimports=[
         'pdfminer.six', 'pdfminer.pdfparser', 'pdfminer.pdfinterp',
         'pdfminer.pdfdevice', 'pdfminer.pdfpage', 'pdfminer.converter',
         'pdfminer.layout', 'pdfminer.cmapdb',
-        'requests'  # --- ¡¡AQUÍ ESTÁ EL CAMBIO!! ---
+        'requests',
+        'packaging', 'packaging.version' # <-- ¡AÑADIDO! Para el auto-updater moderno
     ],
     
     # --- EXCLUIR IMPORTACIONES PROBLEMÁTICAS ---
@@ -51,8 +66,8 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     
-    # Esto ejecuta runtime_hook.py ANTES que gui.py
-    runtime_hooks=['runtime_hook.py'],
+    # <-- MODIFICADO: Usa la ruta robusta para el hook
+    runtime_hooks=[os.path.join(project_root, 'runtime_hook.py')],
     
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -77,7 +92,8 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=app_icon_path, # Asigna el icono al .exe
+  
+    icon=app_icon_path, # <-- MODIFICADO: Usa la variable robusta
 )
 coll = COLLECT(
     exe,
